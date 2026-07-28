@@ -1,37 +1,39 @@
 # WSJT-X Log Monitor Utility
 
-A lightweight, fully graphical toolset designed to monitor, duplicate, and report metrics on WSJT-X ADIF (`.adi`) log files in real time. This utility bypasses restrictive Windows execution policies and operates entirely out of a native, dark-themed Windows desktop GUI. Especially great for SOTA or POTA activations.
+A lightweight, fully graphical utility for monitoring, duplicating, and reporting metrics on WSJT-X ADIF (`.adi`) log files in real time. It is designed to be easy to launch on Windows without changing PowerShell execution policy, and it uses a dark-themed desktop GUI that is well suited to SOTA or POTA activations.
 
 ## File Manifest & Directory Layout
 
-To run the application properly, place both files in the **exact same folder** on your computer:
+To run the application properly, place the files in the same folder on your computer:
 
 ```text
 [Your Target Folder]
- ├── Run_Monitor.cmd        <-- Double-click this to launch the application
- └── WSJT-X_Monitor.ps1     <-- Main application logic file
+├── WSJT-X Monitor.vbs       <-- Double-click this to launch the utility
+└── WSJT-X_Monitor.ps1       <-- Main application logic file
 ```
+
+> The VBScript launcher is now the recommended entry point for users.
 
 ---
 
 ## Component Descriptions
 
-### 1. `Run_Monitor.cmd` (The Launcher)
-* **Purpose**: Serves as the safe entry point for the utility.
-* **Functionality**: 
-  * Automatically targets the directory where it resides, making the tool fully portable.
-  * Launches PowerShell with a temporary security flag (`-ExecutionPolicy Bypass`), allowing the script to run without altering your system's permanent security policies.
-  * Safely hands off execution to the background engine and closes itself cleanly.
+### 1. `WSJT-X Monitor.vbs` (The Launcher)
+* **Purpose**: Serves as the user-facing entry point for the utility.
+* **Functionality**:
+  * Launches the PowerShell script from the same folder.
+  * Uses `powershell.exe` with `-ExecutionPolicy Bypass` so it can run without changing system-wide policy settings.
+  * Keeps the startup experience simple for end users.
 
 ### 2. `WSJT-X_Monitor.ps1` (The Application Engine)
 * **Purpose**: Handles the user interface, file tracking, and live data parsing.
 * **Functionality**:
-  * **Hides the Console**: Utilizes the native Windows `user32.dll` API to instantly hide the command prompt window upon launch, keeping your workspace clean.
-  * **Graphical Prompts**: Displays native Windows dialogue boxes and input fields for session configuration instead of text-based console prompts.
-  * **Automated Timestamps**: Dynamically generates custom filenames pre-filled with the active UTC date string (e.g., `20260727_xxxxx.adi`).
-  * **Delta-Tracking Sync**: Safely monitors the primary WSJT-X log file without causing file-lock conflicts. When WSJT-X writes a new contact, the engine isolates only the new data bytes and streams them to your custom log.
-  * **Metrics Aggregation**: Scans the file using a case-insensitive regex engine targeting the standard `<call:X>` ADIF tag to maintain an accurate count of unique callsigns.
-  * **Dynamic UI Dashboard**: Hosts a dark-mode GUI frame that updates metrics instantly when new rows are logged, while refreshing the session timer precisely every 60 seconds.
+  * **Hides the Console**: Uses the native Windows `user32.dll` API to hide the background console window on launch.
+  * **Graphical Prompts**: Displays native Windows dialog boxes and input fields instead of text-based prompts.
+  * **Automated Timestamps**: Creates custom filenames pre-filled with the current UTC date string (for example, `20260728_xxxxx.adi`).
+  * **Delta-Tracking Sync**: Monitors the original WSJT-X log file safely and mirrors new contacts into the selected output file.
+  * **Metrics Aggregation**: Scans the file for standard ADIF `<call:X>` values and keeps a count of unique callsigns.
+  * **Dynamic UI Dashboard**: Updates the dashboard in real time as new contacts are logged.
 
 ---
 
@@ -40,18 +42,23 @@ To run the application properly, place both files in the **exact same folder** o
 | Metric | Specification |
 | :--- | :--- |
 | **Interface Framework** | Dark Mode Native GUI (`System.Windows.Forms`) |
-| **Resource Management** | Low CPU/RAM footprint; idle loop handled via background hardware timers |
-| **Regex Match Engine** | `(?i)<call:\d+>([a-z0-9/]+)` (Supports standard and portable/mobile indicators) |
-| **File Sharing Protocol** | `[System.IO.FileShare]::ReadWrite` (Eliminates app conflicts and locking errors) |
-| **Process Cleanup** | Absolute termination of background loops (`Stop-Process -Id $PID`) upon closing the window |
+| **Resource Management** | Low CPU/RAM footprint; idle loop handled by background timers |
+| **Regex Match Engine** | `(?i)<call:\d+>([a-z0-9/]+)` (supports standard and portable/mobile indicators) |
+| **File Sharing Protocol** | `[System.IO.FileShare]::ReadWrite` (avoids file-lock conflicts) |
+| **Process Cleanup** | Stops background monitoring loops when the dashboard is closed |
 
 ---
 
 ## How to Use
 
-1. Copy both `Run_Monitor.cmd` and `WSJT-X_Monitor.ps1` into your preferred directory.
-2. Double-click `Run_Monitor.cmd`.
-3. Choose whether you want to create a new `.adi` log file for your current session:
-   * **Click No**: The dashboard opens and monitors your default `wsjtx_log.adi` file.
-   * **Click Yes**: Enter a custom suffix for your filename. The tool creates the file, switches the dashboard target to it, and mirrors all incoming contacts from WSJT-X into it in real time.
+1. Copy `WSJT-X Monitor.vbs` and `WSJT-X_Monitor.ps1` into your preferred directory.
+2. Double-click `WSJT-X Monitor.vbs`.
+3. Choose whether you want to create a new `.adi` log file for the current session:
+   * **Click No**: The dashboard opens and monitors your existing default `wsjtx_log.adi` file.
+   * **Click Yes**: Enter a custom suffix for the filename. The tool creates the file, switches the dashboard target to it, and mirrors incoming contacts from WSJT-X into it in real time.
 4. Close the dashboard window at any time to fully stop monitoring and exit the program.
+
+### Configuration
+On its first run, the utility automatically generates a `config.json` file in the application directory.
+* To change the target log directory, edit `config.json` and update the `OriginalFilePath` string.
+* Ensure you use double backslashes (`\\`) in the JSON path value.

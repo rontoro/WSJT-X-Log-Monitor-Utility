@@ -206,7 +206,7 @@ function Update-GuiDashboard {
 
 # --- BACKGROUND MONITORING TIMERS & WATCHERS ---
 $guiTimer = New-Object System.Windows.Forms.Timer
-$guiTimer.Interval = 60000 
+$guiTimer.Interval = 5000 
 $guiTimer.Add_Tick({ Update-GuiDashboard })
 $guiTimer.Start()
 

@@ -62,79 +62,131 @@ $newFileActive = $false
 $newFilePath = ""
 
 if ($msgBoxResult -eq [System.Windows.Forms.DialogResult]::Yes) {
-    $inputForm = New-Object System.Windows.Forms.Form
-    $inputForm.Text = "New Log Filename"
-    $inputForm.Size = New-Object System.Drawing.Size(400, 160)
-    $inputForm.StartPosition = "CenterScreen"
-    $inputForm.FormBorderStyle = "FixedDialog"
-    $inputForm.MaximizeBox = $false
-    $inputForm.MinimizeBox = $false
-    $inputForm.TopMost = $true
+    $createNewFileChosen = $false
 
-    $utcDateStr = (Get-Date).ToUniversalTime().ToString("yyyyMMdd")
-    $defaultName = "${utcDateStr}_"
+    while (-not $createNewFileChosen) {
+        $inputForm = New-Object System.Windows.Forms.Form
+        $inputForm.Text = "New Log Filename"
+        $inputForm.Size = New-Object System.Drawing.Size(400, 160)
+        $inputForm.StartPosition = "CenterScreen"
+        $inputForm.FormBorderStyle = "FixedDialog"
+        $inputForm.MaximizeBox = $false
+        $inputForm.MinimizeBox = $false
+        $inputForm.TopMost = $true
 
-    $lblInput = New-Object System.Windows.Forms.Label
-    $lblInput.Text = "Enter a name for the new file:"
-    $lblInput.Location = New-Object System.Drawing.Point(20, 15)
-    $lblInput.Size = New-Object System.Drawing.Size(340, 20)
-    $inputForm.Controls.Add($lblInput)
+        $utcDateStr = (Get-Date).ToUniversalTime().ToString("yyyyMMdd")
+        $defaultName = "${utcDateStr}_"
 
-    $txtInput = New-Object System.Windows.Forms.TextBox
-    $txtInput.Text = $defaultName
-    $txtInput.Location = New-Object System.Drawing.Point(20, 40)
-    $txtInput.Size = New-Object System.Drawing.Size(340, 25)
-    $txtInput.SelectionStart = $txtInput.Text.Length
-    $inputForm.Controls.Add($txtInput)
+        $lblInput = New-Object System.Windows.Forms.Label
+        $lblInput.Text = "Enter a name for the new file:"
+        $lblInput.Location = New-Object System.Drawing.Point(20, 15)
+        $lblInput.Size = New-Object System.Drawing.Size(340, 20)
+        $inputForm.Controls.Add($lblInput)
 
-    $btnOk = New-Object System.Windows.Forms.Button
-    $btnOk.Text = "OK"
-    $btnOk.Location = New-Object System.Drawing.Point(200, 80)
-    $btnOk.DialogResult = [System.Windows.Forms.DialogResult]::OK
-    $inputForm.AcceptButton = $btnOk
-    $inputForm.Controls.Add($btnOk)
+        $txtInput = New-Object System.Windows.Forms.TextBox
+        $txtInput.Text = $defaultName
+        $txtInput.Location = New-Object System.Drawing.Point(20, 40)
+        $txtInput.Size = New-Object System.Drawing.Size(340, 25)
+        $txtInput.SelectionStart = $txtInput.Text.Length
+        $inputForm.Controls.Add($txtInput)
 
-    $btnCancel = New-Object System.Windows.Forms.Button
-    $btnCancel.Text = "Cancel"
-    $btnCancel.Location = New-Object System.Drawing.Point(285, 80)
-    $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $inputForm.CancelButton = $btnCancel
-    $inputForm.Controls.Add($btnCancel)
+        $btnOk = New-Object System.Windows.Forms.Button
+        $btnOk.Text = "OK"
+        $btnOk.Location = New-Object System.Drawing.Point(200, 80)
+        $btnOk.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $inputForm.AcceptButton = $btnOk
+        $inputForm.Controls.Add($btnOk)
 
-    $dialogResult = $inputForm.ShowDialog()
-    $userInput = $txtInput.Text
-    $inputForm.Dispose()
+        $btnCancel = New-Object System.Windows.Forms.Button
+        $btnCancel.Text = "Cancel"
+        $btnCancel.Location = New-Object System.Drawing.Point(285, 80)
+        $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $inputForm.CancelButton = $btnCancel
+        $inputForm.Controls.Add($btnCancel)
 
-    if ($dialogResult -eq [System.Windows.Forms.DialogResult]::OK -and -not [string]::IsNullOrWhiteSpace($userInput)) {
+        $dialogResult = $inputForm.ShowDialog()
+        $userInput = $txtInput.Text
+        $inputForm.Dispose()
+
+        if ($dialogResult -ne [System.Windows.Forms.DialogResult]::OK -or [string]::IsNullOrWhiteSpace($userInput)) {
+            break
+        }
+
         if ($userInput -eq $defaultName) { $userInput += "session" }
         if ($userInput -notlike "*.adi") { $userInput += ".adi" }
-        
+
         $newFilePath = Join-Path $folder $userInput
-        
+
         if (Test-Path $newFilePath) {
-            $overwriteResult = [System.Windows.Forms.MessageBox]::Show(
-                "The file '$userInput' already exists.`n`nDo you want to overwrite it and clear its contents?", 
-                "Warning: File Exists", 
-                [System.Windows.Forms.MessageBoxButtons]::YesNo, 
-                [System.Windows.Forms.MessageBoxIcon]::Warning,
-                [System.Windows.Forms.MessageBoxDefaultButton]::Button2
-            )
-            if ($overwriteResult -ne [System.Windows.Forms.DialogResult]::Yes) {
-                # Fall back to monitoring the original file safely
-                $global:monitoredFilePath = $filePath
-                $global:fileCreationUtc = (Get-Item $filePath).CreationTimeUtc
-                Update-GuiDashboard
-                return
+            $overwriteForm = New-Object System.Windows.Forms.Form
+            $overwriteForm.Text = "Warning: File Exists"
+            $overwriteForm.Size = New-Object System.Drawing.Size(430, 190)
+            $overwriteForm.StartPosition = "CenterScreen"
+            $overwriteForm.FormBorderStyle = "FixedDialog"
+            $overwriteForm.MaximizeBox = $false
+            $overwriteForm.MinimizeBox = $false
+            $overwriteForm.TopMost = $true
+
+            $lblOverwrite = New-Object System.Windows.Forms.Label
+            $lblOverwrite.Text = "The file '$userInput' already exists.`n`nChoose an action:"
+            $lblOverwrite.Location = New-Object System.Drawing.Point(20, 15)
+            $lblOverwrite.Size = New-Object System.Drawing.Size(380, 60)
+            $overwriteForm.Controls.Add($lblOverwrite)
+
+            $btnOverwrite = New-Object System.Windows.Forms.Button
+            $btnOverwrite.Text = "Overwrite"
+            $btnOverwrite.Location = New-Object System.Drawing.Point(20, 95)
+            $btnOverwrite.Size = New-Object System.Drawing.Size(110, 32)
+            $btnOverwrite.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+            $overwriteForm.Controls.Add($btnOverwrite)
+
+            $btnNo = New-Object System.Windows.Forms.Button
+            $btnNo.Text = "Cancel"
+            $btnNo.Location = New-Object System.Drawing.Point(145, 95)
+            $btnNo.Size = New-Object System.Drawing.Size(110, 32)
+            $btnNo.DialogResult = [System.Windows.Forms.DialogResult]::No
+            $overwriteForm.Controls.Add($btnNo)
+
+            $btnMonitor = New-Object System.Windows.Forms.Button
+            $btnMonitor.Text = "Monitor This File"
+            $btnMonitor.Location = New-Object System.Drawing.Point(270, 95)
+            $btnMonitor.Size = New-Object System.Drawing.Size(140, 32)
+            $btnMonitor.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            $overwriteForm.Controls.Add($btnMonitor)
+
+            $overwriteResult = $overwriteForm.ShowDialog()
+            $overwriteForm.Dispose()
+
+            if ($overwriteResult -eq [System.Windows.Forms.DialogResult]::Yes) {
+                [System.IO.File]::WriteAllText($newFilePath, "")
+                $global:lastOriginalSize = (Get-Item $filePath).Length
+                $newFileActive = $true
+                $global:originalLogPath = $filePath
+                $filePath = $newFilePath
+                $createNewFileChosen = $true
+                break
             }
+
+            if ($overwriteResult -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                $global:monitoredFilePath = $newFilePath
+                $global:fileCreationUtc = (Get-Item $newFilePath).CreationTimeUtc
+                $newFileActive = $false
+                $filePath = $newFilePath
+                $createNewFileChosen = $true
+                break
+            }
+
+            continue
         }
-        
+
         New-Item -Path $newFilePath -ItemType "File" -Force | Out-Null
         $global:lastOriginalSize = (Get-Item $filePath).Length
         $newFileActive = $true
         $global:originalLogPath = $filePath
         $filePath = $newFilePath
+        $createNewFileChosen = $true
+        break
     }
-
 }
 
 # Capture metadata
@@ -144,7 +196,7 @@ $global:fileCreationUtc = (Get-Item $filePath).CreationTimeUtc
 # --- MAIN WINDOWS FORMS GUI INITIALIZATION ---
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "WSJT-X Log Monitor Dashboard"
-$form.Size = New-Object System.Drawing.Size(480, 240)
+$form.Size = New-Object System.Drawing.Size(480, 280)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox = $false
@@ -175,6 +227,30 @@ $lblFile     = Add-DashboardRow "1. File Name:" 20 ([System.Drawing.Color]::Whit
 $lblCreated  = Add-DashboardRow "2. Created (UTC):" 55 ([System.Drawing.Color]::White)
 $lblElapsed  = Add-DashboardRow "3. Elapsed Time:" 90 ([System.Drawing.Color]::LightGreen)
 $lblUnique   = Add-DashboardRow "4. Unique Calls:" 125 ([System.Drawing.Color]::Gold)
+
+$btnOpenFile = New-Object System.Windows.Forms.Button
+$btnOpenFile.Text = "Open File"
+$btnOpenFile.Location = New-Object System.Drawing.Point(20, 180)
+$btnOpenFile.Size = New-Object System.Drawing.Size(120, 32)
+$btnOpenFile.ForeColor = [System.Drawing.Color]::White
+$btnOpenFile.Add_Click({
+    if (Test-Path $global:monitoredFilePath) {
+        Start-Process -FilePath $global:monitoredFilePath | Out-Null
+    } else {
+        [System.Windows.Forms.MessageBox]::Show("The monitored file could not be found.", "Open File") | Out-Null
+    }
+})
+$form.Controls.Add($btnOpenFile)
+
+$btnClose = New-Object System.Windows.Forms.Button
+$btnClose.Text = "Close"
+$btnClose.Location = New-Object System.Drawing.Point(155, 180)
+$btnClose.Size = New-Object System.Drawing.Size(120, 32)
+$btnClose.ForeColor = [System.Drawing.Color]::White
+$btnClose.Add_Click({
+    $form.Close()
+})
+$form.Controls.Add($btnClose)
 
 # --- REFRESH ENGINE ---
 function Update-GuiDashboard {

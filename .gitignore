@@ -3,7 +3,6 @@ config.json
 
 # Generated or temporary files
 *.adi
-*.png
 *.bak
 *.tmp
 Thumbs.db

@@ -168,9 +168,12 @@ if ($msgBoxResult -eq [System.Windows.Forms.DialogResult]::Yes) {
             }
 
             if ($overwriteResult -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                $global:lastOriginalSize = (Get-Item $filePath).Length
                 $global:monitoredFilePath = $newFilePath
+                $global:originalLogPath = $filePath
+                $global:newFilePathCopy = $newFilePath
                 $global:fileCreationUtc = (Get-Item $newFilePath).CreationTimeUtc
-                $newFileActive = $false
+                $newFileActive = $true
                 $filePath = $newFilePath
                 $createNewFileChosen = $true
                 break
@@ -191,7 +194,13 @@ if ($msgBoxResult -eq [System.Windows.Forms.DialogResult]::Yes) {
 
 # Capture metadata
 $global:monitoredFilePath = $filePath
-$global:fileCreationUtc = (Get-Item $filePath).CreationTimeUtc
+if (-not $newFileActive) {
+    $global:originalLogPath = $filePath
+    $global:lastOriginalSize = (Get-Item $global:originalLogPath).Length
+} else {
+    $global:lastOriginalSize = (Get-Item $global:originalLogPath).Length
+}
+$global:fileCreationUtc = (Get-Item $global:monitoredFilePath).CreationTimeUtc
 
 # --- MAIN WINDOWS FORMS GUI INITIALIZATION ---
 $form = New-Object System.Windows.Forms.Form
@@ -253,22 +262,44 @@ $btnClose.Add_Click({
 $form.Controls.Add($btnClose)
 
 # --- REFRESH ENGINE ---
-function Update-GuiDashboard {
-    try {
-        $uniqueCalls = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-        if (Test-Path $global:monitoredFilePath) {
-            $stream = New-Object System.IO.FileStream($global:monitoredFilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-            $reader = New-Object System.IO.StreamReader($stream)
-            $content = $reader.ReadToEnd()
-            $reader.Close()
-            $stream.Close()
-            
-            $matches = [regex]::Matches($content, '(?i)<call:\d+>([a-z0-9/]+)')
+function Get-UniqueCallCount {
+    param(
+        [string]$Path
+    )
+
+    $uniqueCalls = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if (-not (Test-Path $Path)) { return 0 }
+
+    $attempts = 0
+    while ($attempts -lt 5) {
+        try {
+            $stream = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            try {
+                $reader = New-Object System.IO.StreamReader($stream)
+                $content = $reader.ReadToEnd()
+                $reader.Dispose()
+            } finally {
+                $stream.Dispose()
+            }
+
+            $matches = [regex]::Matches($content, '(?i)<\s*call:\d+>\s*([a-z0-9/]+)')
             foreach ($match in $matches) {
-                # Pull raw inner regex capture group values accurately
                 $null = $uniqueCalls.Add($match.Groups[1].Value)
             }
+            return $uniqueCalls.Count
+        } catch {
+            $attempts++
+            if ($attempts -ge 5) { return $uniqueCalls.Count }
+            Start-Sleep -Milliseconds 250
         }
+    }
+
+    return $uniqueCalls.Count
+}
+
+function Update-GuiDashboard {
+    try {
+        $uniqueCount = Get-UniqueCallCount $global:monitoredFilePath
         $duration = (Get-Date).ToUniversalTime() - $global:fileCreationUtc
         $hours = [math]::Floor($duration.TotalHours)
         $minutes = $duration.Minutes
@@ -276,7 +307,7 @@ function Update-GuiDashboard {
         $lblFile.Text    = Split-Path $global:monitoredFilePath -Leaf
         $lblCreated.Text = $global:fileCreationUtc.ToString("yyyy-MM-dd HH:mm:ss")
         $lblElapsed.Text = "${hours} hrs, ${minutes} mins"
-        $lblUnique.Text  = $uniqueCalls.Count.ToString()
+        $lblUnique.Text  = $uniqueCount.ToString()
     } catch {}
 }
 
@@ -287,15 +318,17 @@ $guiTimer.Add_Tick({ Update-GuiDashboard })
 $guiTimer.Start()
 
 $watcher = New-Object System.IO.FileSystemWatcher
-$watcher.Path = Split-Path $filePath
-$watcher.Filter = Split-Path $filePath -Leaf
+$watcher.Path = Split-Path $global:monitoredFilePath
+$watcher.Filter = Split-Path $global:monitoredFilePath -Leaf
 $watcher.IncludeSubdirectories = $false
 $watcher.EnableRaisingEvents = $true
 
 $watcherAction = {
     $form.Invoke([Action]{ Update-GuiDashboard })
 }
-Register-ObjectEvent $watcher "Changed" -Action $watcherAction | Out-Null
+foreach ($eventName in @("Changed", "Created", "Deleted", "Renamed")) {
+    Register-ObjectEvent $watcher $eventName -Action $watcherAction | Out-Null
+}
 
 if ($newFileActive) {
     $global:newFilePathCopy = $newFilePath
@@ -307,26 +340,46 @@ if ($newFileActive) {
     $copyAction = {
         try {
             $currentSize = (Get-Item $global:originalLogPath).Length
-            if ($currentSize -gt $global:lastOriginalSize) {
-                $origStream = New-Object System.IO.FileStream($global:originalLogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-                $origStream.Seek($global:lastOriginalSize, [System.IO.SeekOrigin]::Begin) | Out-Null
-                $reader = New-Object System.IO.StreamReader($origStream)
-                $newContent = $reader.ReadToEnd()
-                $reader.Close()
-                $origStream.Close()
-                
-                if (-not [string]::IsNullOrEmpty($newContent)) {
-                    $targetStream = New-Object System.IO.FileStream($global:newFilePathCopy, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
-                    $writer = New-Object System.IO.StreamWriter($targetStream)
-                    $writer.Write($newContent)
-                    $writer.Close()
-                    $targetStream.Close()
+            if ($currentSize -le $global:lastOriginalSize) { return }
+
+            $attempts = 0
+            while ($attempts -lt 10) {
+                try {
+                    $origStream = New-Object System.IO.FileStream($global:originalLogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                    try {
+                        $origStream.Seek($global:lastOriginalSize, [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $reader = New-Object System.IO.StreamReader($origStream)
+                        $newContent = $reader.ReadToEnd()
+                        $reader.Dispose()
+                    } finally {
+                        $origStream.Dispose()
+                    }
+
+                    if (-not [string]::IsNullOrEmpty($newContent)) {
+                        $targetStream = New-Object System.IO.FileStream($global:newFilePathCopy, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+                        try {
+                            $writer = New-Object System.IO.StreamWriter($targetStream)
+                            $writer.Write($newContent)
+                            $writer.Flush()
+                            $writer.Dispose()
+                        } finally {
+                            $targetStream.Dispose()
+                        }
+                    }
+
+                    $global:lastOriginalSize = $currentSize
+                    return
+                } catch {
+                    $attempts++
+                    if ($attempts -ge 10) { return }
+                    Start-Sleep -Milliseconds 100
                 }
-                $global:lastOriginalSize = $currentSize
             }
         } catch {}
     }
-    Register-ObjectEvent $origWatcher "Changed" -Action $copyAction | Out-Null
+    foreach ($eventName in @("Changed", "Created", "Renamed")) {
+        Register-ObjectEvent $origWatcher $eventName -Action $copyAction | Out-Null
+    }
 }
 
 # Initial Population & Load UI Window Loop

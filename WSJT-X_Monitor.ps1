@@ -51,7 +51,7 @@ $folder = Split-Path $filePath
 
 # --- WINDOWS-BASED YES/NO PROMPT ---
 $msgBoxResult = [System.Windows.Forms.MessageBox]::Show(
-    "Do you want to create a new .adi file?", 
+    "Do you want to create a secondary .adi file for logging this session?", 
     "Create New Log File", 
     [System.Windows.Forms.MessageBoxButtons]::YesNo, 
     [System.Windows.Forms.MessageBoxIcon]::Question,

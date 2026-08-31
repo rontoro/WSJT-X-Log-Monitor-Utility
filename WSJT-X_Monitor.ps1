@@ -205,7 +205,7 @@ $global:fileCreationUtc = (Get-Item $global:monitoredFilePath).CreationTimeUtc
 # --- MAIN WINDOWS FORMS GUI INITIALIZATION ---
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "WSJT-X Log Monitor Dashboard"
-$form.Size = New-Object System.Drawing.Size(480, 280)
+$form.Size = New-Object System.Drawing.Size(530, 280)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox = $false
@@ -232,10 +232,10 @@ function Add-DashboardRow ($text, $top, $valueColor) {
     return $valLabel
 }
 
-$lblFile     = Add-DashboardRow "1. File Name:" 20 ([System.Drawing.Color]::White)
-$lblCreated  = Add-DashboardRow "2. Created (UTC):" 55 ([System.Drawing.Color]::White)
-$lblElapsed  = Add-DashboardRow "3. Elapsed Time:" 90 ([System.Drawing.Color]::LightGreen)
-$lblUnique   = Add-DashboardRow "4. Unique Calls:" 125 ([System.Drawing.Color]::Gold)
+$lblFile     = Add-DashboardRow "File Name:" 20 ([System.Drawing.Color]::White)
+$lblCreated  = Add-DashboardRow "Created (UTC):" 55 ([System.Drawing.Color]::White)
+$lblElapsed  = Add-DashboardRow "Elapsed Time:" 90 ([System.Drawing.Color]::LightGreen)
+$lblUnique   = Add-DashboardRow "Unique Calls:" 125 ([System.Drawing.Color]::Gold)
 
 $btnOpenFile = New-Object System.Windows.Forms.Button
 $btnOpenFile.Text = "Open File"
@@ -260,6 +260,21 @@ $btnClose.Add_Click({
     $form.Close()
 })
 $form.Controls.Add($btnClose)
+
+$btnOpenDir = New-Object System.Windows.Forms.Button
+$btnOpenDir.Text = "Open Directory"
+$btnOpenDir.Location = New-Object System.Drawing.Point(290, 180)
+$btnOpenDir.Size = New-Object System.Drawing.Size(120, 32)
+$btnOpenDir.ForeColor = [System.Drawing.Color]::White
+$btnOpenDir.Add_Click({
+    $fileDir = Split-Path $global:monitoredFilePath
+    if (Test-Path $fileDir) {
+        explorer.exe $fileDir
+    } else {
+        [System.Windows.Forms.MessageBox]::Show("The file directory could not be found.", "Open Directory") | Out-Null
+    }
+})
+$form.Controls.Add($btnOpenDir)
 
 # --- REFRESH ENGINE ---
 function Get-UniqueCallCount {

@@ -1,6 +1,9 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# Debug: Show startup message
+Write-Host "WSJT-X Monitor starting - QSO count badge feature active" -ForegroundColor Cyan
+
 # Win32 API to hide the background console window instantly
 $ShowWindowAsyncCode = '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);'
 $Win32ShowWindowAsync = Add-Type -MemberDefinition $ShowWindowAsyncCode -Name "Win32ShowWindowAsync" -Namespace "Win32" -PassThru
@@ -202,14 +205,54 @@ if (-not $newFileActive) {
 }
 $global:fileCreationUtc = (Get-Item $global:monitoredFilePath).CreationTimeUtc
 
+# --- TRAY ICON SETUP ---
+# Create tray icon that will show the badge
+$trayIcon = New-Object System.Windows.Forms.NotifyIcon
+$trayIcon.Visible = $true
+$trayIcon.Text = "QSOs: 0 - WSJT-X Log Monitor"
+
+# Create tray icon context menu
+$contextMenu = New-Object System.Windows.Forms.ContextMenuStrip
+
+$showMenuItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$showMenuItem.Text = "Show"
+$showMenuItem.Add_Click({
+    $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+    $form.Show()
+    $form.Activate()
+})
+$contextMenu.Items.Add($showMenuItem)
+
+$exitMenuItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$exitMenuItem.Text = "Exit"
+$exitMenuItem.Add_Click({
+    $form.Close()
+})
+$contextMenu.Items.Add($exitMenuItem)
+
+$trayIcon.ContextMenuStrip = $contextMenu
+
+# Double-click to show window
+$trayIcon.Add_DoubleClick({
+    $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+    $form.Show()
+    $form.Activate()
+})
+
 # --- MAIN WINDOWS FORMS GUI INITIALIZATION ---
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "WSJT-X Log Monitor Dashboard"
+$form.Text = "QSOs: 0 - WSJT-X Log Monitor"
 $form.Size = New-Object System.Drawing.Size(530, 280)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox = $false
 $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+
+# Add Load event to update dashboard after form is shown
+$form.Add_Load({
+    Start-Sleep -Milliseconds 100
+    Update-GuiDashboard
+})
 
 $labelFont = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
 $valueFont = New-Object System.Drawing.Font("Consolas", 11, [System.Drawing.FontStyle]::Regular)
@@ -253,7 +296,7 @@ $form.Controls.Add($btnOpenFile)
 
 $btnClose = New-Object System.Windows.Forms.Button
 $btnClose.Text = "Close"
-$btnClose.Location = New-Object System.Drawing.Point(155, 180)
+$btnClose.Location = New-Object System.Drawing.Point(290, 180)
 $btnClose.Size = New-Object System.Drawing.Size(120, 32)
 $btnClose.ForeColor = [System.Drawing.Color]::White
 $btnClose.Add_Click({
@@ -263,7 +306,7 @@ $form.Controls.Add($btnClose)
 
 $btnOpenDir = New-Object System.Windows.Forms.Button
 $btnOpenDir.Text = "Open Directory"
-$btnOpenDir.Location = New-Object System.Drawing.Point(290, 180)
+$btnOpenDir.Location = New-Object System.Drawing.Point(155, 180)
 $btnOpenDir.Size = New-Object System.Drawing.Size(120, 32)
 $btnOpenDir.ForeColor = [System.Drawing.Color]::White
 $btnOpenDir.Add_Click({
@@ -277,6 +320,28 @@ $btnOpenDir.Add_Click({
 $form.Controls.Add($btnOpenDir)
 
 # --- REFRESH ENGINE ---
+function Update-TaskbarBadge {
+    param([int]$Count)
+    
+    # Update window title with QSO count
+    if ($null -ne $form -and -not $form.IsDisposed) {
+        try {
+            $form.Text = "QSOs: $Count - WSJT-X Log Monitor"
+        } catch {
+            # Silent fail
+        }
+    }
+    
+    # Update tray icon tooltip with QSO count at the start
+    if ($null -ne $trayIcon -and -not $trayIcon.IsDisposed) {
+        try {
+            $trayIcon.Text = "QSOs: $Count - WSJT-X Log Monitor"
+        } catch {
+            # Silent fail
+        }
+    }
+}
+
 function Get-UniqueCallCount {
     param(
         [string]$Path
@@ -323,6 +388,9 @@ function Update-GuiDashboard {
         $lblCreated.Text = $global:fileCreationUtc.ToString("yyyy-MM-dd HH:mm:ss")
         $lblElapsed.Text = "${hours} hrs, ${minutes} mins"
         $lblUnique.Text  = $uniqueCount.ToString()
+        
+        # Update taskbar badge
+        Update-TaskbarBadge $uniqueCount
     } catch {}
 }
 
@@ -397,10 +465,83 @@ if ($newFileActive) {
     }
 }
 
-# Initial Population & Load UI Window Loop
-Update-GuiDashboard
+# --- BACKGROUND MONITORING TIMERS & WATCHERS ---
+$guiTimer = New-Object System.Windows.Forms.Timer
+$guiTimer.Interval = 5000 
+$guiTimer.Add_Tick({ Update-GuiDashboard })
+$guiTimer.Start()
+
+$watcher = New-Object System.IO.FileSystemWatcher
+$watcher.Path = Split-Path $global:monitoredFilePath
+$watcher.Filter = Split-Path $global:monitoredFilePath -Leaf
+$watcher.IncludeSubdirectories = $false
+$watcher.EnableRaisingEvents = $true
+
+$watcherAction = {
+    $form.Invoke([Action]{ Update-GuiDashboard })
+}
+foreach ($eventName in @("Changed", "Created", "Deleted", "Renamed")) {
+    Register-ObjectEvent $watcher $eventName -Action $watcherAction | Out-Null
+}
+
+if ($newFileActive) {
+    $global:newFilePathCopy = $newFilePath
+    $origWatcher = New-Object System.IO.FileSystemWatcher
+    $origWatcher.Path = Split-Path $global:originalLogPath
+    $origWatcher.Filter = Split-Path $global:originalLogPath -Leaf
+    $origWatcher.EnableRaisingEvents = $true
+    
+    $copyAction = {
+        try {
+            $currentSize = (Get-Item $global:originalLogPath).Length
+            if ($currentSize -le $global:lastOriginalSize) { return }
+
+            $attempts = 0
+            while ($attempts -lt 10) {
+                try {
+                    $origStream = New-Object System.IO.FileStream($global:originalLogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                    try {
+                        $origStream.Seek($global:lastOriginalSize, [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $reader = New-Object System.IO.StreamReader($origStream)
+                        $newContent = $reader.ReadToEnd()
+                        $reader.Dispose()
+                    } finally {
+                        $origStream.Dispose()
+                    }
+
+                    if (-not [string]::IsNullOrEmpty($newContent)) {
+                        $targetStream = New-Object System.IO.FileStream($global:newFilePathCopy, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+                        try {
+                            $writer = New-Object System.IO.StreamWriter($targetStream)
+                            $writer.Write($newContent)
+                            $writer.Flush()
+                            $writer.Dispose()
+                        } finally {
+                            $targetStream.Dispose()
+                        }
+                    }
+
+                    $global:lastOriginalSize = $currentSize
+                    return
+                } catch {
+                    $attempts++
+                    if ($attempts -ge 10) { return }
+                    Start-Sleep -Milliseconds 100
+                }
+            }
+        } catch {}
+    }
+    foreach ($eventName in @("Changed", "Created", "Renamed")) {
+        Register-ObjectEvent $origWatcher $eventName -Action $copyAction | Out-Null
+    }
+}
+
+# Display form and run application loop
 [System.Windows.Forms.Application]::Run($form)
 
+# Cleanup
+$trayIcon.Visible = $false
+$trayIcon.Dispose()
 $watcher.Dispose()
 if ($newFileActive) { $origWatcher.Dispose() }
 
